@@ -43,10 +43,11 @@
 #include <vector>
 
 #include "SpoutCommon.h"
-#include "spoutMemoryShare.h"
+#include "SpoutSharedMemory.h"
 
 #define SPOUT_WAIT_TIMEOUT 100 // 100 msec wait for events
 #define MaxSenders 10 // Max for list of Sender names
+#define MaxSenderNameLen 256
 
 // The texture information structure that is saved to shared memory
 // and used for communication between senders and receivers
@@ -63,6 +64,8 @@ struct SharedTextureInfo {
 	wchar_t description[128]; // Wyhon compatible description (not used)
 	unsigned __int32 partnerId; // Wyphon id of partner that shared it with us (not unused)
 };
+
+
 
 
 using namespace std;
@@ -132,7 +135,6 @@ protected:
 		// Sender name set management
 		bool CreateSenderSet();
 		bool GetSenderSet (std::set<string>& SenderNames);
-		bool SetSenderSet (std::set<string>& Sendernames);
 
 		// Active sender management
 		bool setActiveSenderName (const char* SenderName);
@@ -164,6 +166,9 @@ protected:
 		// i.e. if another sender has an open view, the map is not closed.
 		//
 
+		static void		parseSetFromBuffer(const char* buffer, std::set<string>& SenderNames);
+		static void		writeBufferFromSet(const std::set<string>& SenderNames, char *buffer);
+
 		// Memory map mutex locks
 		bool CreateMapLock  (const char *mapname, HANDLE &hMutex);
 		void CloseMapLock (HANDLE hMutex);
@@ -171,20 +176,20 @@ protected:
 		void UnlockMap      (HANDLE hMutex);
 
 
+
+		SpoutSharedMemory	m_senderNames;
+
 		// Pointers for memory maps
 		char* m_pSenderMap;
 		char* m_pActiveSenderMap;
-		char* m_pSenderNamesMap;
 
 		// Handles for memory maps
 		HANDLE m_hSenderMap;
 		HANDLE m_hActiveSenderMap;
-		HANDLE m_hSenderNamesMap;
 
 		// Handles for mutex map locks
 		HANDLE m_hSenderMutex;
 		HANDLE m_hActiveSenderMutex;
-		HANDLE m_hSenderNamesMutex;
 
 };
 

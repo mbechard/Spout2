@@ -54,15 +54,12 @@ spoutSenderNames::spoutSenderNames() {
 
 	m_hSenderMutex = NULL;
 	m_hActiveSenderMutex = NULL;
-	m_hSenderNamesMutex = NULL;
 	
 	m_hSenderMap = NULL;
 	m_hActiveSenderMap = NULL;
-	m_hSenderNamesMap = NULL;
 	
 	m_pSenderMap = NULL;
 	m_pActiveSenderMap = NULL;
-	m_pSenderNamesMap = NULL;
 
 }
 
@@ -91,12 +88,18 @@ bool spoutSenderNames::RegisterSenderName(const char* Sendername) {
 	std::set<string> SenderNames; // set of names
 
 	// Create the shared memory for the sender name set if it does not exist
-	if(!GetSenderSet(SenderNames)) {
-		if(!CreateSenderSet()) {
-			return false;
-		}
-		// The new memory map is empty so we don't need to get it
+	if(!CreateSenderSet()) {
+		return false;
 	}
+
+
+	char *pBuf = m_senderNames.Lock();
+
+	if (!pBuf) {
+		return false;
+	}
+
+	parseSetFromBuffer(pBuf, SenderNames);
 
 	//
 	// Add the Sender name to the set of names
@@ -104,7 +107,9 @@ bool spoutSenderNames::RegisterSenderName(const char* Sendername) {
 	ret = SenderNames.insert(Sendername);
 	if(ret.second) {
 		// write the new map to shared memory
-		SetSenderSet(SenderNames);
+
+		writeBufferFromSet(SenderNames, pBuf);
+
 		// Set as the active Sender if it is the first one registered
 		// Thereafter the user can select an active Sender using SpoutPanel or SpoutSenders
 		if(SenderNames.size() == 1) {
@@ -146,9 +151,15 @@ bool spoutSenderNames::RegisterSenderName(const char* Sendername) {
 			// If it is not the first sender, open a view of the maps 
 			// so they do not get closed by another instance
 			m_pActiveSenderMap = OpenMap("ActiveSenderName", 256, m_hActiveSenderMap);
-			m_pSenderNamesMap = OpenMap("SpoutSenderNames", MaxSenders*256, m_hSenderNamesMap);
+
+			// MB - Why is this being opened here? It should have already
+			// been opened in the CreateSenderSet() call at the
+			// start of the function
+			//m_pSenderNamesMap = OpenMap("SpoutSenderNames", MaxSenders*256, m_hSenderNamesMap);
 		}
 	}
+
+	m_senderNames.Unlock();
 
 	return ret.second;
 }
@@ -188,12 +199,6 @@ bool spoutSenderNames::ReleaseSenderName(const char* Sendername)
 					// But to be sure they can be closed here
 
 					// printf("    closing name set map\n");
-					CloseMap(m_pSenderNamesMap, m_hSenderNamesMap);
-					CloseMapLock(m_hSenderNamesMutex);
-					// Important to null the pointer and handle
-					m_pSenderNamesMap = NULL;
-					m_hSenderNamesMap = NULL;
-					m_hSenderNamesMutex = NULL;
 
 					// printf("    closing active sender map\n");
 					CloseMap(m_pActiveSenderMap, m_hActiveSenderMap);
@@ -223,6 +228,20 @@ bool spoutSenderNames::RemoveSender(const char* Sendername)
 	string namestring;
 	char name[256];
 
+	// Create the shared memory for the sender name set if it does not exist
+	if(!CreateSenderSet()) {
+		return false;
+	}
+
+
+	char *pBuf = m_senderNames.Lock();
+
+	if (!pBuf) {
+		return false;
+	}
+
+	parseSetFromBuffer(pBuf, SenderNames);
+
 	// Discovered that the project properties had been set to CLI
 	// Properties -> General -> Common Language Runtime Support
 	// and this caused the set "find" function not to work.
@@ -230,43 +249,42 @@ bool spoutSenderNames::RemoveSender(const char* Sendername)
 	// printf("spoutSenderNames::ReleaseSenderName(%s)\n", Sendername);
 
 	// Get the current map to update the list
-	if(GetSenderSet(SenderNames)) {
-		if(SenderNames.find(Sendername) != SenderNames.end() ) {
-			// printf("Releasing sender [%s]\n", Sendername);
-			SenderNames.erase(Sendername); // erase the matching Sender
+	if(SenderNames.find(Sendername) != SenderNames.end() ) {
+		// printf("Releasing sender [%s]\n", Sendername);
+		SenderNames.erase(Sendername); // erase the matching Sender
 
-			// Must be here otherwise the set is retrieved again if there was only one sender
-			SetSenderSet(SenderNames); // set the map back to shared memory again
+		writeBufferFromSet(SenderNames, pBuf);
 
-			// The sender is created by this instance
-			// On application close, the memory map is released as long as there are no active views
-			// But for repeated context change and sender reset, the map handle must be closed
-			// or there is a leak.
-			CloseMap(m_pSenderMap, m_hSenderMap);
-			m_pSenderMap = NULL;
-			m_hSenderMap = NULL;
+		// The sender is created by this instance
+		// On application close, the memory map is released as long as there are no active views
+		// But for repeated context change and sender reset, the map handle must be closed
+		// or there is a leak.
+		CloseMap(m_pSenderMap, m_hSenderMap);
+		m_pSenderMap = NULL;
+		m_hSenderMap = NULL;
 
-			// Close the named mutex for this sender
-			CloseMapLock(m_hSenderMutex);
-			m_hSenderMutex = NULL;
+		// Close the named mutex for this sender
+		CloseMapLock(m_hSenderMutex);
+		m_hSenderMutex = NULL;
 
-			// Is there a set left ?
-			if(SenderNames.size() > 0) {
-				// This should be OK because the user selects the active sender
-				// Was it the active sender ?
-				if( (getActiveSenderName(name) && strcmp(name, Sendername) == 0) || SenderNames.size() == 1) { 
-					// It was, so choose the first in the list
-					iter = SenderNames.begin();
-					namestring = *iter;
-					strcpy_s(name, 256, namestring.c_str());
-					// Set it as the active sender
-					setActiveSenderName(name);
-				}
+		// Is there a set left ?
+		if(SenderNames.size() > 0) {
+			// This should be OK because the user selects the active sender
+			// Was it the active sender ?
+			if( (getActiveSenderName(name) && strcmp(name, Sendername) == 0) || SenderNames.size() == 1) { 
+				// It was, so choose the first in the list
+				iter = SenderNames.begin();
+				namestring = *iter;
+				strcpy_s(name, 256, namestring.c_str());
+				// Set it as the active sender
+				setActiveSenderName(name);
 			}
-			return true;
 		}
+		m_senderNames.Unlock();
+		return true;
 	}
 
+	m_senderNames.Unlock();
 	return false; // Sender name not in the set or no set in shared mempry
 
 } // end RemoveSender
@@ -1001,6 +1019,55 @@ void spoutSenderNames::AllowAccess(HANDLE hReadEvent, HANDLE hWriteEvent)
 // Private functions for multiple Sender support //
 ///////////////////////////////////////////////////
 
+void spoutSenderNames::parseSetFromBuffer(const char* buffer,
+											std::set<string>& SenderNames)
+{
+	// first empty the set
+	if(SenderNames.size() > 0) {
+		SenderNames.erase (SenderNames.begin(), SenderNames.end() );
+	}
+
+	const char *buf = buffer;
+	char name[MaxSenderNameLen];		// char array to test for nulls
+	int i = 0;
+	do {
+		// the actual string retrieved from shared memory should terminate
+		// with a null within the 256 chars.
+		// At the end of the map there will be a null in the data.
+		// Must use a character array to ensure testing for null.
+		strncpy_s(name, buf, MaxSenderNameLen);
+		if(name[0] > 0) {
+			// printf("    Retrieving %s\n", name);
+			// insert name into set
+			// seems OK with a char array instead of converting to a string first
+			SenderNames.insert(name);
+		}
+		// increment by 256 bytes for the next name
+		buf += MaxSenderNameLen;
+		i++;
+	} while (name[0] > 0 && i < MaxSenders);
+}
+
+void spoutSenderNames::writeBufferFromSet(const std::set<string>& SenderNames,
+												char* buffer)
+{
+	std::string namestring;
+	char *buf = buffer; // pointer within the buffer
+	int i = 0;
+	std::set<string>::iterator iter;
+	for(iter = SenderNames.begin(); iter != SenderNames.end(); iter++) {
+		namestring = *iter; // the string to copy to the buffer
+		// copy it with 256 max length although only the string length will be copied
+		// namestring.copy(buf, 256, 0);
+		// printf("    Writing %s\n", namestring.c_str());
+		strcpy_s(buf, MaxSenderNameLen, namestring.c_str());
+		// move the buffer pointer on for the next Sender name
+		buf += MaxSenderNameLen;
+		i++;
+		if(i > MaxSenders) break; // do not exceed the size of the local buffer
+	}
+}
+
 //
 //  Functions to read and write the list of Sender names to/from shared memory
 //
@@ -1010,13 +1077,10 @@ bool spoutSenderNames::CreateSenderSet()
 {
 
 	// Set up Shared Memory for all the sender names
-	m_pSenderNamesMap = CreateMap("SpoutSenderNames", MaxSenders*256, m_hSenderNamesMap);
-	if(!m_pSenderNamesMap) {
+	bool result = m_senderNames.Open("SpoutSenderNames", MaxSenders*MaxSenderNameLen);
+	if(!result) {
 		return false;
 	}
-
-	// create a map lock mutex for the name set
-	CreateMapLock("SpoutSenderNames", m_hSenderNamesMutex); 
 
 	return true;
 
@@ -1026,127 +1090,42 @@ bool spoutSenderNames::CreateSenderSet()
 // TODO - use pointer from initial map creation
 bool spoutSenderNames::GetSenderSet(std::set<string>& SenderNames) {
 
-	int i;
 	string namestring;	// local string to retrieve names
-	char name[256];		// char array to test for nulls
-	char *pBuf;			// pointer to shared memory buffer
-	HANDLE hMap;		// handle to shared memory
-	HANDLE hLock;
-	char *buffer;		// local buffer for data transfer
-	char *buf;			// pointer within the buffer
 	std::set<string>::iterator iter;
 
-	// Lock the map
-	LockMap("SpoutSenderNames", hLock);
 
-	pBuf = OpenMap("SpoutSenderNames", MaxSenders*256, hMap );
-	if(hMap == NULL || pBuf == NULL) {
-		UnlockMap(hLock);
+	if (!CreateSenderSet())
+	{
+		return false;
+	}
+
+	char* pBuf = m_senderNames.Lock();
+
+	if (!pBuf)
+	{
 		return false;
 	}
 
 	// The data has been stored with 256 bytes reserved for each Sender name
 	// and nothing will have changed with the map yet
-	buffer = (char *)malloc(MaxSenders*256*sizeof(unsigned char));
-	memset( (void *)buffer, 0, MaxSenders*256 ); // make sure it is clear because we rely on nulls
+	// MB - Use alloca, we know the data is small enough to fit on the stack
+	char *buffer = (char *)_alloca(MaxSenders*MaxSenderNameLen*sizeof(unsigned char));
+	// MB - No need to do this memset, we are doing a memcpy of the entire data
+	// directly after this
+	//memset( (void *)buffer, 0, MaxSenders*MaxSenderNameLen ); // make sure it is clear because we rely on nulls
 
 	// copy the shared memory to the local buffer
-	memcpy ( (void *)buffer, (void *)pBuf, MaxSenders*256 );
+	memcpy ( (void *)buffer, (void *)pBuf, MaxSenders*MaxSenderNameLen );
+
+	m_senderNames.Unlock();
 
 	// Read back from the buffer and rebuild the set
+	parseSetFromBuffer(buffer, SenderNames);
 	
-	// first empty the set
-	if(SenderNames.size() > 0) {
-		SenderNames.erase (SenderNames.begin(), SenderNames.end() );
-	}
-
-	buf = (char *)buffer;
-	i = 0;
-	do {
-		// the actual string retrieved from shared memory should terminate
-		// with a null within the 256 chars.
-		// At the end of the map there will be a null in the data.
-		// Must use a character array to ensure testing for null.
-		strncpy_s(name, buf, 256);
-		if(name[0] > 0) {
-			// printf("    Retrieving %s\n", name);
-			// insert name into set
-			// seems OK with a char array instead of converting to a string first
-			SenderNames.insert(name);
-		}
-		// increment by 256 bytes for the next name
-		buf += 256;
-		i++;
-	} while(name[0] > 0 && i < MaxSenders);
-
-	free((void *)buffer);
-
-	// Close the open memory map
-	CloseMap(pBuf, hMap);
-	UnlockMap(hLock);
 
 	return true;
 
 } // end GetSenderSet
-
-
-
-// Copy the Sender names set to shared memory which must exist first
-// TODO - use pointer from initial map creation - can be done because this is local
-bool spoutSenderNames::SetSenderSet(std::set<string>& SenderNames) 
-{
-	char* pBuf;
-	HANDLE hMap;
-	int i;
-	string namestring;	// local string to retrieve names
-	char* buffer;		// local buffer for data transfer
-	char* buf;			// pointer within the buffer
-	std::set<string>::iterator iter;
-	HANDLE hLock;
-
-	// Lock the shared memory map with it's mutex - wait maximum 4 frames for access
-	LockMap("SpoutSenderNames", hLock);
-
-	pBuf = OpenMap("SpoutSenderNames", MaxSenders*256, hMap );
-	if(hMap == NULL || pBuf == NULL) {
-		UnlockMap(hLock);
-		return false;
-	}
-
-	// transfer the Sender name set to shared memory
-	// First write the set strings to a buffer
-	// We don't know the exact size of each Sender name, so save each one as 256 bytes
-	// so we can read them back later even if the string lengths are different
-	buffer = (char *)malloc(MaxSenders*256*sizeof(unsigned char));
-	memset( (void *)buffer, 0, MaxSenders*256 ); // make sure it is clear because we rely on nulls
-	buf = (char *)buffer; // pointer within the buffer
-	i = 0;
-	for(iter = SenderNames.begin(); iter != SenderNames.end(); iter++) {
-		namestring = *iter; // the string to copy to the buffer
-		// copy it with 256 max length although only the string length will be copied
-		// namestring.copy(buf, 256, 0);
-		// printf("    Writing %s\n", namestring.c_str());
-		strcpy_s(buf, 256, namestring.c_str());
-		// move the buffer pointer on for the next Sender name
-		buf += 256;
-		i++;
-		if(i > MaxSenders) break; // do not exceed the size of the local buffer
-	}
-
-	// Write the whole buffer containing the set of Sender names to shared memory
-	memcpy ( (void *)pBuf, (void *)buffer, MaxSenders*256 );
-
-	// Cleanup
-	free((void *)buffer);
-	
-	CloseMap(pBuf, hMap);
-	UnlockMap(hLock);
-
-	return true;
-
-} // end SetSenderSet
-
-
 
 // Create a shared memory map to set the active Sender name to shared memory
 // This is a separate small shared memory with a fixed sharing name
@@ -1398,7 +1377,7 @@ bool spoutSenderNames::SenderDebug(const char *Sendername, int size)
 
 	printf("**** SENDER DEBUG ****\n");
 
-	printf("1) hSenderNamesMap = [%x], pSenderNamesMap = [%x]\n", m_hSenderNamesMap, m_pSenderNamesMap);
+	m_senderNames.Debug();
 
 	// Check the sender names
 	/*
@@ -1434,16 +1413,6 @@ bool spoutSenderNames::SenderDebug(const char *Sendername, int size)
 		printf("    GetSenderSet failed\n");
 	}
 
-	// LJ DEBUG Try to open the names map directly
-	hMap1 = OpenFileMappingA (FILE_MAP_ALL_ACCESS, FALSE, "SpoutSenderNames");
-	if(hMap1) {
-		printf("    Opened sendernames map [%x] - m_hSenderNamesMap = [%x]\n", hMap1, m_hSenderNamesMap);
-		CloseHandle(hMap1);
-	}
-	else {
-		printf("    Could not open sendernames map\n");
-	}
-	
 	/*
 	// printf("2) Closing - hSenderNamesMap = [%x], pSenderNamesMap = [%x]\n", m_hSenderNamesMap, m_pSenderNamesMap);
 

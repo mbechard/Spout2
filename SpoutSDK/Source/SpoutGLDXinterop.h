@@ -40,6 +40,7 @@
 #include "spoutGLextensions.h"
 #include "spoutDirectX.h"
 #include "spoutSenderNames.h"
+#include "SpoutMemoryShare.h"
 
 #include <windowsx.h>
 #include <d3d9.h>	// DX9
