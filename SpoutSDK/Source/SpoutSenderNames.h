@@ -47,7 +47,7 @@
 
 #define SPOUT_WAIT_TIMEOUT 100 // 100 msec wait for events
 #define MaxSenders 10 // Max for list of Sender names
-#define MaxSenderNameLen 256
+#define SpoutMaxSenderNameLen 256
 
 // The texture information structure that is saved to shared memory
 // and used for communication between senders and receivers
@@ -103,9 +103,9 @@ class SPOUT_DLLEXP spoutSenderNames {
 		// ------------------------------------------------------------
 		// Functions to maintain the active sender
 		bool SetActiveSender     (const char* Sendername);
-		bool GetActiveSender     (char* Sendername);
+		bool GetActiveSender     (char Sendername[SpoutMaxSenderNameLen]);
 		bool GetActiveSenderInfo (SharedTextureInfo* info);
-		bool FindActiveSender    (char *activename, unsigned int &width, unsigned int &height, HANDLE &hSharehandle, DWORD &dwFormat);
+		bool FindActiveSender    (char activename[SpoutMaxSenderNameLen], unsigned int &width, unsigned int &height, HANDLE &hSharehandle, DWORD &dwFormat);
 
 		// ------------------------------------------------------------
 		// Functions to Create, Find, Update and Close a sender without initializing DirectX or the GL/DX interop functions
@@ -138,7 +138,7 @@ protected:
 
 		// Active sender management
 		bool setActiveSenderName (const char* SenderName);
-		bool getActiveSenderName (const char* SenderName);
+		bool getActiveSenderName (char SenderName[SpoutMaxSenderNameLen]);
 
 		// Generic sender map info retrieval
 		// bool getSharedInfo (const char* SenderName, SharedTextureInfo* info);
@@ -166,30 +166,22 @@ protected:
 		// i.e. if another sender has an open view, the map is not closed.
 		//
 
-		static void		parseSetFromBuffer(const char* buffer, std::set<string>& SenderNames);
-		static void		writeBufferFromSet(const std::set<string>& SenderNames, char *buffer);
+		static void		readSenderSetFromBuffer(const char* buffer, std::set<string>& SenderNames);
+		static void		writeBufferFromSenderSet(const std::set<string>& SenderNames, char *buffer);
 
 		// Memory map mutex locks
 		bool CreateMapLock  (const char *mapname, HANDLE &hMutex);
 		void CloseMapLock (HANDLE hMutex);
-		bool LockMap        (const char *mapname, HANDLE &hMutex);
-		void UnlockMap      (HANDLE hMutex);
 
 
 
 		SpoutSharedMemory	m_senderNames;
+		SpoutSharedMemory	m_activeSender;
 
-		// Pointers for memory maps
-		char* m_pSenderMap;
-		char* m_pActiveSenderMap;
-
-		// Handles for memory maps
-		HANDLE m_hSenderMap;
-		HANDLE m_hActiveSenderMap;
-
-		// Handles for mutex map locks
-		HANDLE m_hSenderMutex;
-		HANDLE m_hActiveSenderMutex;
+		// This should be a unordered_map of sender names ->SharedMemory
+		// to handle multiple inputs and outputs all going through the
+		// same spoutSenderNames class
+		SpoutSharedMemory	m_curSender;
 
 };
 

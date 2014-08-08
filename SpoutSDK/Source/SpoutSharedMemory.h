@@ -49,7 +49,11 @@ public:
 	~SpoutSharedMemory();
 
 
-	bool	Open(const char* name, int size);
+	// Create a new memory segment, or attachs to an existing one
+	bool	Create(const char* name, int size);
+
+	// Opens an existing one
+	bool	Open(const char* name);
 	void	Close();
 
 	// Returns the buffer
