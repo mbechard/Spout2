@@ -42,6 +42,7 @@ SpoutSharedMemory::SpoutSharedMemory()
 	m_hMap = NULL;
 	m_pName = NULL;
 	m_size = 0;
+	m_lockCount = 0;
 }
 
 SpoutSharedMemory::~SpoutSharedMemory()
@@ -196,11 +197,20 @@ SpoutSharedMemory::Close()
 		m_pName = NULL;
 	}
 	m_size = 0;
+	m_lockCount = 0;
 }
 
 char* SpoutSharedMemory::Lock()
 {
+	assert(m_lockCount >= 0);
+
 	assert(m_hMutex);
+	if (m_lockCount > 0)
+	{
+		assert(m_pBuffer);
+		m_lockCount++;
+		return m_pBuffer;
+	}
 
 	DWORD waitResult = WaitForSingleObject(m_hMutex, 67);
 
@@ -209,6 +219,7 @@ char* SpoutSharedMemory::Lock()
 		return NULL;
 	}
 
+	m_lockCount++;
 	assert(m_pBuffer);
 	return m_pBuffer;
 }
@@ -216,7 +227,14 @@ char* SpoutSharedMemory::Lock()
 void SpoutSharedMemory::Unlock()
 {
 	assert(m_hMutex);
-	ReleaseMutex(m_hMutex);
+
+	m_lockCount--;
+	assert(m_lockCount >= 0);
+
+	if (m_lockCount == 0)
+	{
+		ReleaseMutex(m_hMutex);
+	}
 }
 
 

@@ -66,6 +66,8 @@ private:
 	HANDLE	m_hMap;
 	HANDLE	m_hMutex;
 
+	int		m_lockCount;
+
 	const char*	m_pName;
 	int			m_size;
 };

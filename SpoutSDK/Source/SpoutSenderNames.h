@@ -169,10 +169,6 @@ protected:
 		static void		readSenderSetFromBuffer(const char* buffer, std::set<string>& SenderNames);
 		static void		writeBufferFromSenderSet(const std::set<string>& SenderNames, char *buffer);
 
-		// Memory map mutex locks
-		bool CreateMapLock  (const char *mapname, HANDLE &hMutex);
-		void CloseMapLock (HANDLE hMutex);
-
 
 
 		SpoutSharedMemory	m_senderNames;

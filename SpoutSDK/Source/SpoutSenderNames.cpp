@@ -125,11 +125,20 @@ bool spoutSenderNames::ReleaseSenderName(const char* Sendername)
 {
 	string namestring;
 	std::set<string> SenderNames; // set of names
-	std::map<std::string, HANDLE> maphandles;
 	std::set<string>::iterator iter;
 	bool bRet = false;
 
-	// printf("**** CLOSE SENDER ****\n", Sendername);
+	// Create the shared memory for the sender name set if it does not exist
+	if(!CreateSenderSet()) {
+		return false;
+	}
+
+	// We are doing multiple operations on the sender names here
+	// so keep it locked throughout
+	if (!m_senderNames.Lock())
+	{
+		return false;
+	}
 
 	// Get the current list to update the passed list
 	if(GetSenderSet(SenderNames)) {
@@ -159,6 +168,7 @@ bool spoutSenderNames::ReleaseSenderName(const char* Sendername)
 			}
 		}
 	}
+	m_senderNames.Unlock();
 
 	return bRet; // the Sender name did not exist
 
@@ -255,17 +265,9 @@ bool spoutSenderNames::FindSenderName(const char* Sendername)
 // Function to return the set of Sender names in shared memory.
 bool spoutSenderNames::GetSenderNames(std::set<string> *Sendernames)
 {
-	string namestring;
-	std::set<string> SenderNames;
-	std::set<string>::iterator iter;
-
 	// Get the current list to update the passed list
-	if(GetSenderSet(SenderNames)) {
-		for(iter = SenderNames.begin(); iter != SenderNames.end(); iter++) {
-			namestring = *iter; // the string to copy
-			// printf("    Name : %s\n", namestring.c_str());
-			Sendernames[0].insert(namestring);
-		}
+	if (GetSenderSet(*Sendernames)) 
+	{
 		return true;
 	}
 
@@ -280,6 +282,17 @@ int spoutSenderNames::GetSenderCount() {
 	string namestring;
 	char name[SpoutMaxSenderNameLen];
 	SharedTextureInfo info;
+
+	// Create the shared memory for the sender name set if it does not exist
+	if(!CreateSenderSet()) {
+		return 0;
+	}
+
+	// Doing multiple operations on the sender list, keep it locked
+	if (!m_senderNames.Lock())
+	{
+		return 0;
+	}
 
 	// get the name list in shared memory into a local list
 	GetSenderNames(&SenderSet);
@@ -302,11 +315,15 @@ int spoutSenderNames::GetSenderCount() {
 			}
 		}
 	}
+	
 
 	// Get the new set back
 	if(GetSenderNames(&SenderSet)) {
+		m_senderNames.Unlock();
 		return(SenderSet.size());
 	}
+
+	m_senderNames.Unlock();
 
 	return 0;
 }
@@ -416,14 +433,27 @@ bool spoutSenderNames::SetActiveSender(const char *Sendername)
 {
 	std::set<string> SenderNames;
 
+	if (!CreateSenderSet())
+	{
+		return false;
+	}
+
+	// Keep the sender set locked for this entire operation
+	if (!m_senderNames.Lock())
+	{
+		return false;
+	}
+
 	// Get the current list to check whether the passed name is in it
 	if(GetSenderSet(SenderNames)) {
 		if(SenderNames.find(Sendername) != SenderNames.end() ) {
 			if(setActiveSenderName(Sendername)) { // set the active Sender name to shared memory
+				m_senderNames.Unlock();
 				return true;
 			}
 		}
 	}
+	m_senderNames.Unlock();
 	return false;
 } // end SetActiveSender
 
@@ -1136,49 +1166,6 @@ bool spoutSenderNames::getSharedInfo(const char* sharedMemoryName, SharedTexture
 	return true;
 
 } // end getSharedInfo
-
-
-// =====================================
-//	Mutex locks for shared memory :
-//		1) Sender name map
-//		2) Active sender info structure
-//		3) Sender info structure
-// ======================================
-bool spoutSenderNames::CreateMapLock(const char *mapname, HANDLE &hMutex)
-{
-	// Have room for "_mutex"
-	char mutexname[SpoutMaxSenderNameLen + 6];
-
-	// Make the mutex name different to the mapname, but connected so it can be opened and released
-	if(hMutex) return true;
-
-	// Create a Mutex to control access to the name map
-	sprintf_s(mutexname, "%s_mutex", mapname);
-
-	// No initial ownership
-	hMutex = CreateMutexA(NULL, 0, mutexname); // Creates or opens existing
-	if (hMutex == NULL) { 
-		return false;
-	}
-
-	return true;
-}
-
-
-// Close the handle from initial creation
-// All handles will then be closed
-void spoutSenderNames::CloseMapLock(HANDLE hMutex)
-{
-	//
-	// http://msdn.microsoft.com/en-us/library/windows/desktop/ms682411%28v=vs.85%29.aspx
-	//
-	// Use the CloseHandle function to close the handle. 
-	// The system closes the handle automatically when the process terminates. 
-	// The mutex object is destroyed when its last handle has been closed.
-	if(hMutex) CloseHandle(hMutex);
-
-}
-
 
 
 //---------------------------------------------------------
