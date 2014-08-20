@@ -50,7 +50,7 @@ SpoutSharedMemory::~SpoutSharedMemory()
 	Close();
 }
 
-bool SpoutSharedMemory::Create(const char* name, int size)
+SpoutCreateResult SpoutSharedMemory::Create(const char* name, int size)
 {
 	// Don't call open twice on the same object without a Close()
 	assert(name);
@@ -60,7 +60,7 @@ bool SpoutSharedMemory::Create(const char* name, int size)
 	{
 		assert(strcmp(name, m_pName) == 0);
 		assert(m_pBuffer && m_hMutex);
-		return true;
+		return SPOUT_ALREADY_CREATED;
 	}
 
 	m_hMap = CreateFileMappingA ( INVALID_HANDLE_VALUE,
@@ -72,14 +72,16 @@ bool SpoutSharedMemory::Create(const char* name, int size)
 
 	if (m_hMap == NULL)
 	{
-		return false;
+		return SPOUT_CREATE_FAILED;
 	}
 
 
 	DWORD err = GetLastError();
 
+	bool alreadyExists = false;
 	if (err == ERROR_ALREADY_EXISTS)
 	{
+		alreadyExists = true;
 		// We should ensure the already existing mapping is at least
 		// the size we expect
 	}
@@ -90,7 +92,7 @@ bool SpoutSharedMemory::Create(const char* name, int size)
 	if (!m_pBuffer)
 	{
 		Close();
-		return false;
+		return SPOUT_CREATE_FAILED;
 	}
 
 	std::string	mutexName;
@@ -102,13 +104,13 @@ bool SpoutSharedMemory::Create(const char* name, int size)
 	if (!m_hMutex)
 	{
 		Close();
-		return false;
+		return SPOUT_CREATE_FAILED;
 	}
 
 	m_pName = strdup(name);
 	m_size = size;
 
-	return true;
+	return alreadyExists ? SPOUT_ALREADY_EXISTS : SPOUT_CREATE_SUCCESS;
 
 }
 

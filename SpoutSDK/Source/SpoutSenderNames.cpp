@@ -48,13 +48,20 @@
 
 */
 #include "spoutSenderNames.h"
+#include <assert.h>
 
 spoutSenderNames::spoutSenderNames() {
+	m_senders = new unordered_map<std::string, SpoutSharedMemory*>();
 
 }
 
 spoutSenderNames::~spoutSenderNames() {
 
+	for (auto itr = m_senders->begin(); itr != m_senders->end(); itr++)
+	{
+		delete itr->second;
+	}
+	delete m_senders;
 	// LJ DEBUG
 	/*
 	char sendername[256];
@@ -85,6 +92,8 @@ bool spoutSenderNames::RegisterSenderName(const char* Sendername) {
 
 	char *pBuf = m_senderNames.Lock();
 
+	// Register the sender name in the list of spout senders
+
 	if (!pBuf) {
 		return false;
 	}
@@ -95,6 +104,16 @@ bool spoutSenderNames::RegisterSenderName(const char* Sendername) {
 	// Add the Sender name to the set of names
 	//
 	ret = SenderNames.insert(Sendername);
+	if(!ret.second) {
+		// See if there are any dangling entries that arn't valid
+		// anymore
+		cleanSenderSet();
+
+		readSenderSetFromBuffer(pBuf, SenderNames);
+		ret = SenderNames.insert(Sendername);
+
+	}
+
 	if(ret.second) {
 		// write the new map to shared memory
 
@@ -111,77 +130,18 @@ bool spoutSenderNames::RegisterSenderName(const char* Sendername) {
 		}
 	}
 
+
 	m_senderNames.Unlock();
 
 	return ret.second;
 }
 
-
-// Function to release a Sender name from the list of names
-// Removes the Sender name and if it was the last one, 
-// closes the shared memory map for the Sender name list
-// See also RemoveSender
-bool spoutSenderNames::ReleaseSenderName(const char* Sendername) 
-{
-	string namestring;
-	std::set<string> SenderNames; // set of names
-	std::set<string>::iterator iter;
-	bool bRet = false;
-
-	// Create the shared memory for the sender name set if it does not exist
-	if(!CreateSenderSet()) {
-		return false;
-	}
-
-	// We are doing multiple operations on the sender names here
-	// so keep it locked throughout
-	if (!m_senderNames.Lock())
-	{
-		return false;
-	}
-
-	// Get the current list to update the passed list
-	if(GetSenderSet(SenderNames)) {
-		if (SenderNames.size() > 0) {
-			// RemoveSender removes the sender from the name set,
-			// deletes it's shared memory map and removes it from the handles map
-			if (RemoveSender(Sendername)) { 
-				// The name existed when it was removed from the list
-				// its shared memory map is now also removed
-				// and if it was the active sender, that is updated if more senders exist.
-				GetSenderSet(SenderNames);
-				if (SenderNames.size() == 0) {
-
-					// printf("    LAST SENDER\n");
-
-					// If it is the last sender, the names map and mutex will be closed
-					// as long as there are no open views left
-					// http://msdn.microsoft.com/en-us/library/windows/desktop/aa366537%28v=vs.85%29.aspx
-					// But to be sure they can be closed here
-
-					// printf("    closing name set map\n");
-
-					// printf("    closing active sender map\n");
-					m_activeSender.Close();
-				}
-				bRet = true;
-			}
-		}
-	}
-	m_senderNames.Unlock();
-
-	return bRet; // the Sender name did not exist
-
-} // end ReleaseSenderName
-
-
 //
 // Removes a Sender from the set of Sender names
 //
-bool spoutSenderNames::RemoveSender(const char* Sendername) 
+bool spoutSenderNames::ReleaseSenderName(const char* Sendername) 
 {
 	std::set<string> SenderNames;
-	std::set<string>::iterator iter;
 	string namestring;
 	char name[SpoutMaxSenderNameLen];
 
@@ -195,6 +155,14 @@ bool spoutSenderNames::RemoveSender(const char* Sendername)
 
 	if (!pBuf) {
 		return false;
+	}
+
+	namestring = Sendername;
+	auto foundSender = m_senders->find(namestring);
+	if (foundSender != m_senders->end())
+	{
+		delete foundSender->second;
+		m_senders->erase(namestring);
 	}
 
 	readSenderSetFromBuffer(pBuf, SenderNames);
@@ -212,19 +180,13 @@ bool spoutSenderNames::RemoveSender(const char* Sendername)
 
 		writeBufferFromSenderSet(SenderNames, pBuf);
 
-		// The sender is created by this instance
-		// On application close, the memory map is released as long as there are no active views
-		// But for repeated context change and sender reset, the map handle must be closed
-		// or there is a leak.
-		m_curSender.Close();
-
 		// Is there a set left ?
 		if(SenderNames.size() > 0) {
 			// This should be OK because the user selects the active sender
 			// Was it the active sender ?
 			if( (getActiveSenderName(name) && strcmp(name, Sendername) == 0) || SenderNames.size() == 1) { 
 				// It was, so choose the first in the list
-				iter = SenderNames.begin();
+				std::set<string>::iterator iter = SenderNames.begin();
 				namestring = *iter;
 				strcpy_s(name, namestring.c_str());
 				// Set it as the active sender
@@ -259,6 +221,54 @@ bool spoutSenderNames::FindSenderName(const char* Sendername)
 	}
 
 	return false;
+}
+
+void spoutSenderNames::cleanSenderSet()
+{
+	if(!CreateSenderSet()) {
+		return;
+	}
+
+	char *pBuf = m_senderNames.Lock();
+
+	if (!pBuf) {
+	    return;
+	}
+
+	std::set<string> SenderNames;
+	readSenderSetFromBuffer(pBuf, SenderNames);
+
+	bool changed = false;
+
+	for (auto itr = SenderNames.begin(); itr != SenderNames.end(); )
+	{
+		// It's one of ours, so thats fine
+		if (m_senders->find(*itr) != m_senders->end())
+		{
+			itr++;
+			continue;
+		}
+		SpoutSharedMemory mem;
+		// This isn't found, we clean it up
+		if (!mem.Open((*itr).c_str()))
+		{
+			changed = true;
+			SenderNames.erase(itr++);
+		}
+		else
+		{
+			++itr;
+		}
+		
+	}
+
+	if (changed)
+	{
+		writeBufferFromSenderSet(SenderNames, pBuf);
+	}
+
+	m_senderNames.Unlock();
+	
 }
 
 
@@ -395,8 +405,19 @@ bool spoutSenderNames::GetSenderInfo(const char* sendername, unsigned int &width
 bool spoutSenderNames::SetSenderInfo(const char* sendername, unsigned int width, unsigned int height, HANDLE dxShareHandle, DWORD dwFormat) 
 {
 	SharedTextureInfo info;
+
+	string nameString = sendername;
 	
-	char *pBuf = m_curSender.Lock();
+	auto foundSender = m_senders->find(nameString);
+
+	if (foundSender == m_senders->end())
+	{
+		return false;
+	}
+
+	auto senderInfoMap = foundSender->second;
+
+	char *pBuf = senderInfoMap->Lock();
 
 	if (!pBuf)
 	{
@@ -411,7 +432,7 @@ bool spoutSenderNames::SetSenderInfo(const char* sendername, unsigned int width,
 
 	memcpy((void *)pBuf, (void *)&info, sizeof(SharedTextureInfo) );
 
-	m_curSender.Unlock();
+	senderInfoMap->Unlock();
 	
 	return true;
 
@@ -529,68 +550,30 @@ bool spoutSenderNames::FindActiveSender(char sendername[SpoutMaxSenderNameLen], 
 // without initializing DirectX or the GL/DX interop functions                     //
 /////////////////////////////////////////////////////////////////////////////////////
 
-
-// ---------------------------------------------------------
-//	Create a sender with the info of a shared DirectX texture
-//		1) Create a new named sender shared memory map
-//		2) Set the sender texture info to the map
-//		3) Register the sender name in the list of Spout senders
-//
-//	This sender is specific to this instance. 
-//	There cannot be more than one sender per object.
-//
-// ---------------------------------------------------------
-bool spoutSenderNames::CreateSender(const char *sendername, unsigned int width, unsigned int height, HANDLE hSharehandle, DWORD dwFormat)
-{
-	string namestring;
-	// HANDLE hMap;
-	// char *pBuf;
-
-	// printf("CreateSender - %s, %dx%d, [%x] [%d]\n", sendername, width, height, hSharehandle, dwFormat);
-	/*
-	// Is the sender of the same name already running ?
-	// Problem here with Max sender if there has been a context
-	// change and the sender is released and recreated.
-	// needs debugging	
-	pBuf = OpenMap(sendername, 256, hMap);
-	if(pBuf) {
-		char temp[512];
-		// Serious enough for a messagebox
-		sprintf_s(temp, "Cannot create sender\n(%s)\nIs one already running?", 512, sendername);
-		MessageBoxA(NULL, temp, "Spout", MB_OK);
-		CloseMap(pBuf, hMap);
-		return false;
-	}
-	*/
-
-	// Create or open a shared memory map for this sender - allocate enough for the texture info
-	bool result = m_curSender.Create(sendername, sizeof(SharedTextureInfo));
-	if(!result) {
-		return false;
-	}
-
-	// Register the sender name in the list of spout senders
-	RegisterSenderName(sendername);
-	
-	// TODO - createsender with just a name
-	if(width > 0 && height > 0) {
-		// Save the info for this sender in the shared memory map
-		if(!SetSenderInfo(sendername, width, height, hSharehandle, dwFormat)) {
-			return false;
-		}
-	}
-
-	return true;
-		
-} // end CreateSender
-
-
 // ---------------------------------------------------------
 //	Update the texture info of a sender
 //	Used for example when a sender's texture changes size
 // ---------------------------------------------------------
 bool spoutSenderNames::UpdateSender(const char *sendername, unsigned int width, unsigned int height, HANDLE hSharehandle, DWORD dwFormat)
 {
+	string namestring = sendername;
+
+
+	if (m_senders->find(namestring) == m_senders->end())
+	{
+		// Create or open a shared memory map for this sender - allocate enough for the texture info
+		
+
+		SpoutSharedMemory *senderInfoMem = new SpoutSharedMemory();
+		SpoutCreateResult result = senderInfoMem->Create(sendername, sizeof(SharedTextureInfo));
+		if(result == SPOUT_CREATE_FAILED) {
+			delete senderInfoMem;
+			m_senderNames.Unlock();
+			return false;
+		}
+		(*m_senders)[namestring] = senderInfoMem;
+	}
+
 	// Save the info for this sender in the sender shared memory map
 	if(!SetSenderInfo(sendername, width, height, hSharehandle, dwFormat))
 		return false;
@@ -598,19 +581,6 @@ bool spoutSenderNames::UpdateSender(const char *sendername, unsigned int width, 
 	return true;
 		
 } // end UpdateSender
-
-
-
-// ---------------------------------------------------------
-//	Close a sender - for external access
-//	See - ReleaseSenderName - redundancy or reorganise
-// ---------------------------------------------------------
-bool spoutSenderNames::CloseSender(const char* sendername)
-{
-	ReleaseSenderName(sendername);
-	return true;
-}
-
 
 
 // ===============================================================================
@@ -715,127 +685,6 @@ bool spoutSenderNames::CheckSender(const char *sendername, unsigned int &theWidt
 
 } // end CheckSender
 // ==================
-
-
-
-//
-// Functions to manage creating, releasing, opening and closing of named memory maps
-//
-char* spoutSenderNames::CreateMap(const char* MapName, int MapSize, HANDLE &hMap)
-{
-	HANDLE hMapFile;
-	char* pBuf;
-	DWORD errnum;
-
-	// Set up Shared Memory
-	// Must create the file mapping to the maximum size 
-	// needed because it can't be changed afterwards
-	hMapFile = CreateFileMappingA (	INVALID_HANDLE_VALUE,	// hFile - use paging file
-								NULL,						// LPSECURITY_ATTRIBUTES - default security 
-								PAGE_READWRITE,				// flProtect - read/write access
-								0,							// The high-order DWORD - dwMaximumSizeHigh - max. object size 
-								MapSize,					// The low-order DWORD - dwMaximumSizeLow - buffer size  
-								(LPCSTR)MapName);			// name of mapping object
-	
-	if (hMapFile == NULL) {
-		// printf("	CreateMap null handle (%s)\n", MapName);
-		hMap = NULL;
-		return NULL;
-	}
-
-	errnum = GetLastError();
-	// printf("	CreateMap (%s) GetLastError = %d\n", MapName, errnum);
-
-	if(errnum == ERROR_INVALID_HANDLE) {
-		// printf("	CreateMap (%s) invalid handle\n", MapName);
-	}
-
-	if(errnum == ERROR_ALREADY_EXISTS) {
-		// printf("	CreateMap [%s][%x] already exists\n", MapName, hMapFile);
-	}
-	else {
-		// printf("	CreateMap [%s][%x] NEW MAP\n", MapName, hMapFile);
-	}
-
-	pBuf = (char *) MapViewOfFile(hMapFile,				// handle to map object
-								  FILE_MAP_ALL_ACCESS,	// read/write permission
-								  0,
-								  0,
-								  MapSize );			// 
-	
-	if (pBuf == NULL) {
-		DWORD errnum = GetLastError(); 
-		if(errnum > 0) {
-			// printf("    CreateMap (%s) : GetLastError() = %d\n", MapName, errnum);
-			// ERROR_INVALID_HANDLE 6 (0x6) The handle is invalid.
-		}
-		CloseHandle(hMapFile);
-		hMap = NULL;
-		return NULL;
-	}
-
-	hMap = hMapFile;
-
-	return pBuf;
-
-}
-
-
-char* spoutSenderNames::OpenMap(const char* MapName, int MapSize, HANDLE &hMap)
-{
-	char* pBuf;
-	HANDLE hMapFile;
-
-	hMapFile = OpenFileMappingA (FILE_MAP_ALL_ACCESS, // read/write access
-								 FALSE,				  // do not inherit the name
-								 MapName);			  // name of mapping object
-
-	if (hMapFile == NULL) {
-		// no map file means no sender is present
-		hMap = NULL;
-		return NULL;
-	}
-	pBuf = (char *) MapViewOfFile(hMapFile,				// handle to map object
-								  FILE_MAP_ALL_ACCESS,	// read/write permission
-								  0,
-								  0,
-								  MapSize );			// 
-	if (pBuf == NULL) {
-		DWORD errnum = GetLastError(); 
-		if(errnum > 0) {
-			// printf("    OpenMap (%s) : GetLastError() = %d\n", MapName, errnum);
-			// ERROR_INVALID_HANDLE 6 (0x6) The handle is invalid.
-		}
-		CloseHandle(hMapFile);
-		hMap = NULL;
-		return NULL;
-	}
-
-	hMap = hMapFile;
-
-	return pBuf;
-	
-} // end OpenMap
-
-
-
-// Here we can unmap the view of the map but not close the handle by sending a null handle
-// or close the map by sending a valid handle but NULL buffer pointer
-void spoutSenderNames::CloseMap(const char* MapBuffer, HANDLE hMap)
-{
-	if(MapBuffer != NULL) {
-		UnmapViewOfFile((LPCVOID)MapBuffer);
-	}
-
-	// When the process no longer needs access to the file mapping object, it should call the CloseHandle function. 
-	// When all handles are closed, the system can free the section of the paging file that the object uses.
-	if(hMap != NULL) {
-		CloseHandle(hMap); // Handle is closed but not released
-	}
-
-}  // end CloseMap
-
-
 
 // ==========================================================================
 //	Event locks used to control read/write on top of interop object lock
@@ -1029,6 +878,12 @@ void spoutSenderNames::writeBufferFromSenderSet(const std::set<string>& SenderNa
 		i++;
 		if(i > MaxSenders) break; // do not exceed the size of the local buffer
 	}
+	// If we havn't totally filled the sender list, then null terminate the
+	// next entry to terminate the list
+	if (i < MaxSenders)
+	{
+		*buf = '\0';
+	}
 }
 
 //
@@ -1040,8 +895,8 @@ bool spoutSenderNames::CreateSenderSet()
 {
 
 	// Set up Shared Memory for all the sender names
-	bool result = m_senderNames.Create("SpoutSenderNames", MaxSenders*SpoutMaxSenderNameLen);
-	if(!result) {
+	SpoutCreateResult result = m_senderNames.Create("SpoutSenderNames", MaxSenders*SpoutMaxSenderNameLen);
+	if(result == SPOUT_CREATE_FAILED) {
 		return false;
 	}
 

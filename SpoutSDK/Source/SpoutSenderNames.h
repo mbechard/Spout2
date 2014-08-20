@@ -41,6 +41,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 #include "SpoutCommon.h"
 #include "SpoutSharedMemory.h"
@@ -67,7 +68,6 @@ struct SharedTextureInfo {
 
 
 
-
 using namespace std;
 
 class SPOUT_DLLEXP spoutSenderNames {
@@ -80,10 +80,10 @@ class SPOUT_DLLEXP spoutSenderNames {
 		// public functions
 
 		// ------------------------------------------------------------
-		// Registration, Release and Find sender name functions
-		bool RegisterSenderName (const char* Sendername);
-		bool ReleaseSenderName  (const char* Sendername);
-		bool RemoveSender       (const char* Sendername);
+		// You must first register a sender name being using
+		// UpdateSender() to update it's texture information
+		bool RegisterSenderName(const char* senderName);
+		bool ReleaseSenderName(const char* senderName);
 		bool FindSenderName     (const char* Sendername);
 
 		// ------------------------------------------------------------
@@ -108,18 +108,11 @@ class SPOUT_DLLEXP spoutSenderNames {
 		bool FindActiveSender    (char activename[SpoutMaxSenderNameLen], unsigned int &width, unsigned int &height, HANDLE &hSharehandle, DWORD &dwFormat);
 
 		// ------------------------------------------------------------
-		// Functions to Create, Find, Update and Close a sender without initializing DirectX or the GL/DX interop functions
-		bool CreateSender (const char *sendername, unsigned int width = 0, unsigned int height = 0, HANDLE hSharehandle = NULL, DWORD dwFormat = 0);
+		// Functions to Find or Update a sender without initializing DirectX or the GL/DX interop functions
 		bool UpdateSender (const char *sendername, unsigned int width, unsigned int height, HANDLE hSharehandle, DWORD dwFormat = 0);
-		bool CloseSender  (const char* sendername);
 		bool FindSender       (char *sendername, unsigned int &width, unsigned int &height, HANDLE &hSharehandle, DWORD &dwFormat);
 		bool CheckSender      (const char *sendername, unsigned int &width, unsigned int &height, HANDLE &hSharehandle, DWORD &dwFormat);
 		// ------------------------------------------------------------
-
-		// Memory map management
-		char* CreateMap	(const char* MapName, int MapSize, HANDLE &hMap);
-		char* OpenMap   (const char* MapName, int MapSize, HANDLE &hMap);
-		void  CloseMap  (const char* MapBuffer, HANDLE hMap);
 
 		// Access event locks (unused)
 		bool InitEvents	 (const char *eventname, HANDLE &hReadEvent, HANDLE &hWriteEvent);
@@ -139,6 +132,11 @@ protected:
 		// Active sender management
 		bool setActiveSenderName (const char* SenderName);
 		bool getActiveSenderName (char SenderName[SpoutMaxSenderNameLen]);
+
+
+		// Goes through the full list of sender names and cleans up
+		// any that shouldn't still be around
+		void cleanSenderSet();
 
 		// Generic sender map info retrieval
 		// bool getSharedInfo (const char* SenderName, SharedTextureInfo* info);
@@ -177,7 +175,9 @@ protected:
 		// This should be a unordered_map of sender names ->SharedMemory
 		// to handle multiple inputs and outputs all going through the
 		// same spoutSenderNames class
-		SpoutSharedMemory	m_curSender;
+		// Make this a pointer to avoid size differences between compilers
+		// if the .dll is compiled with something different
+		std::unordered_map<std::string, SpoutSharedMemory*>*	m_senders;
 
 };
 

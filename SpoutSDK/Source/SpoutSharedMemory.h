@@ -43,6 +43,14 @@
 #include <d3d9.h>
 #include <wingdi.h>
 
+enum SpoutCreateResult
+{
+	SPOUT_CREATE_FAILED = 0,
+	SPOUT_CREATE_SUCCESS,
+	SPOUT_ALREADY_EXISTS,
+	SPOUT_ALREADY_CREATED,
+};
+
 class SPOUT_DLLEXP SpoutSharedMemory {
 public:
 	SpoutSharedMemory();
@@ -50,7 +58,7 @@ public:
 
 
 	// Create a new memory segment, or attachs to an existing one
-	bool	Create(const char* name, int size);
+	SpoutCreateResult	Create(const char* name, int size);
 
 	// Opens an existing one
 	bool	Open(const char* name);

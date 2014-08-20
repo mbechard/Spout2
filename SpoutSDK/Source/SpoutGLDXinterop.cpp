@@ -218,10 +218,16 @@ bool spoutGLDXinterop::CreateInterop(HWND hWnd, char* sendername, unsigned int w
 
 		// Quit if sender creation failed - i.e. trying to create the same sender
 		// LJ DEBUG - modify SpoutPanel to detect format 21 ? How to know it is DX11 ?
-		if(bUseDX9)
-			bRet = senders.CreateSender(sendername, width, height, m_dxShareHandle);
-		else
-			bRet = senders.CreateSender(sendername, width, height, m_dxShareHandle, format);
+		bRet = senders.RegisterSenderName(sendername);
+
+		if (bRet)
+		{
+			if(bUseDX9)
+				bRet = senders.UpdateSender(sendername, width, height, m_dxShareHandle);
+			else
+				bRet = senders.UpdateSender(sendername, width, height, m_dxShareHandle, format);
+		}
+
 		if(!bRet)
 			return false;
 	}
@@ -540,8 +546,10 @@ bool spoutGLDXinterop::LoadGLextensions()
 
 bool spoutGLDXinterop::getSharedTextureInfo(char* sharedMemoryName) {
 
+#if 0
 	HANDLE hMap;
 	char* pBuf;
+
 	// HANDLE hLock;
 
 	// Lock the shared memory map with it's mutex - wait 4 frames for access
@@ -559,6 +567,21 @@ bool spoutGLDXinterop::getSharedTextureInfo(char* sharedMemoryName) {
 	// printf("getSharedTextureInfo - m_dxShareHandle = %x\n", m_dxShareHandle);
 
 	senders.CloseMap(pBuf, hMap);
+#endif
+
+	unsigned int w, h;
+	HANDLE handle;
+	DWORD format;
+	if (!senders.FindSender(sharedMemoryName, w, h, handle, format))
+	{
+		return false;
+	}
+
+	m_dxShareHandle = (HANDLE)handle;
+	m_TextureInfo.width = w;
+	m_TextureInfo.height = h;
+	m_TextureInfo.shareHandle = (__int32)handle;
+	m_TextureInfo.format = format;
 	// senders.UnlockMap(hLock);
 
 	return true;
@@ -570,6 +593,7 @@ bool spoutGLDXinterop::getSharedTextureInfo(char* sharedMemoryName) {
 // width and height must have been set first
 bool spoutGLDXinterop::setSharedTextureInfo(char* sharedMemoryName) {
 
+#if 0
 	HANDLE hMap;
 	char* pBuf;
 	// HANDLE hLock;
@@ -594,8 +618,13 @@ bool spoutGLDXinterop::setSharedTextureInfo(char* sharedMemoryName) {
 
 	senders.CloseMap(pBuf, hMap);
 	// senders.UnlockMap(hLock);
+#endif
+	return senders.UpdateSender(sharedMemoryName, 
+							m_TextureInfo.width,
+							m_TextureInfo.height,
+							m_dxShareHandle,
+							m_TextureInfo.format);
 
-	return true;
 
 }
 
@@ -606,6 +635,7 @@ bool spoutGLDXinterop::setSharedTextureInfo(char* sharedMemoryName) {
 bool spoutGLDXinterop::getSharedInfo(char* sharedMemoryName, SharedTextureInfo* info) 
 {
 
+#if 0
 	HANDLE hMap; // handle to the memory map
 	char *pBuf; // pointer to the memory map
 	// HANDLE hLock;
@@ -625,7 +655,10 @@ bool spoutGLDXinterop::getSharedInfo(char* sharedMemoryName, SharedTextureInfo* 
 	senders.CloseMap(pBuf, hMap);
 	// senders.UnlockMap(hLock);
 
-	return true;
+#endif
+
+	return senders.getSharedInfo(sharedMemoryName, info);
+
 } // end getSharedInfo
 
 
