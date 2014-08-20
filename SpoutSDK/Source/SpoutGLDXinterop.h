@@ -63,17 +63,21 @@ class SPOUT_DLLEXP spoutGLDXinterop {
 		void setSharedMemoryName(char* sharedMemoryName, bool bReceive = true); 
 		bool getSharedInfo(char* sharedMemoryName, SharedTextureInfo* info);
 		bool setSharedInfo(char* sharedMemoryName, SharedTextureInfo* info);
+		
 		bool ReadTexturePixels(unsigned char *pixels, unsigned int width, unsigned int height, int glFormat = GL_RGB);
+		bool WriteTexturePixels(unsigned char *pixels, unsigned int width, unsigned int height);
+
 		bool ReadTexture(GLuint TextureID, GLuint TextureTarget, unsigned int width, unsigned int height);
 		bool WriteTexture(GLuint TextureID, GLuint TextureTarget, unsigned int width, unsigned int height, bool bInvert=false);
-		bool WriteTexturePixels(unsigned char *pixels, unsigned int width, unsigned int height);
 		#ifdef USE_PBO_EXTENSIONS
 		bool LoadTexture(GLuint TextureID, GLuint TextureTarget, unsigned int width, unsigned int height, unsigned char *data);
 		#endif
 
 		bool BindSharedTexture();
 		bool UnBindSharedTexture();
+
 		bool DrawSharedTexture(float max_x = 1.0, float max_y = 1.0, float aspect = 1.0);
+		bool DrawToSharedTexture(GLuint TextureID, GLuint TextureTarget, unsigned int width, unsigned int height, float max_x = 1.0, float max_y = 1.0, float aspect = 1.0, bool bInvert = true);
 
 		// DX9
 		bool bUseDX9; // Use DX9 or DX11 (default)
@@ -102,21 +106,16 @@ class SPOUT_DLLEXP spoutGLDXinterop {
 
 		// Utilities
 		bool GLDXcompatible();
-		bool GetVerticalSync();
+		int GetVerticalSync();
 		bool SetVerticalSync(bool bSync = true);
 
 		spoutMemoryShare MemoryShare;	// Shared memory method
 		spoutSenderNames senders;	// Sender management
 		spoutDirectX spoutdx;	// DirectX class
 
-		// 21.07.14 - made public for debugging
-		GLuint	m_glTexture;		// the linked OpenGL texture
-		HANDLE	m_hInteropDevice;	// handle to the DX/GL interop device
-		HANDLE	m_hInteropObject;	// handle to the DX/GL interop object (the shared texture)
 		// Locks for gl/dx interop functions
 		HRESULT LockInteropObject(HANDLE hDevice, HANDLE *hObject);
 		HRESULT UnlockInteropObject(HANDLE hDevice, HANDLE *hObject);
-
 
 	protected:
 
@@ -144,11 +143,10 @@ class SPOUT_DLLEXP spoutGLDXinterop {
 		LPDIRECT3DTEXTURE9		m_dxTexture; // the shared DX9 texture
 
 		
-		// GLuint	m_glTexture;		// the OpneGL texture linked to it
-		// GLuint	m_fbo;				// a local frame buffer object used for texture transfers
-		// HANDLE	m_hInteropDevice;	// handle to the DX/GL interop device
-		// HANDLE	m_hInteropObject;	// handle to the DX/GL interop object (the shared texture)
+		HANDLE	m_hInteropDevice;	// handle to the DX/GL interop device
+		HANDLE	m_hInteropObject;	// handle to the DX/GL interop object (the shared texture)
 		HANDLE	m_dxShareHandle;	// shared DX texture handle
+		GLuint	m_glTexture;		// the OpenGL texture linked to it
 
 		bool getSharedTextureInfo(char* sharedMemoryName);
 		bool setSharedTextureInfo(char* sharedMemoryName);

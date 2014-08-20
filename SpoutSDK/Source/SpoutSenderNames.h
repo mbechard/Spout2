@@ -138,9 +138,6 @@ protected:
 		// any that shouldn't still be around
 		void cleanSenderSet();
 
-		// Generic sender map info retrieval
-		// bool getSharedInfo (const char* SenderName, SharedTextureInfo* info);
-
 		// ------------------------------------------------------------
 		// Functions to manage shared memory map access
 		//

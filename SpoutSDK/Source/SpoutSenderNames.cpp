@@ -777,6 +777,10 @@ bool spoutSenderNames::CheckAccess(HANDLE hEvent)
 {
 	DWORD dwWaitResult;
 
+	// LJ DEBUG
+	// Disabled here pending testing but in place inside the funtions
+	return true;
+
 	if(hEvent == NULL) {
 		return false;
 	}
@@ -813,6 +817,10 @@ bool spoutSenderNames::CheckAccess(HANDLE hEvent)
 
 void spoutSenderNames::AllowAccess(HANDLE hReadEvent, HANDLE hWriteEvent)
 {
+	// LJ DEBUG
+	// Disabled here pending testing but in place inside the funtions
+	return;
+
 	// Set the Write Event to signal readers to read
 	if(hWriteEvent != NULL) {
 		SetEvent(hWriteEvent);
